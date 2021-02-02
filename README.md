@@ -31,7 +31,7 @@ mkdir -p $GOPATH/src/github.com/oboukili; cd $GOPATH/src/github.com/oboukili
 git clone git@github.com:oboukili/pdb-pods-owners-discovery
 ```
 
-Then build the provider
+Then build the CLI
 
 ```sh
 cd $GOPATH/src/github.com/oboukili/pdb-pods-owners-discovery
