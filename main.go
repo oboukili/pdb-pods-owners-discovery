@@ -31,24 +31,20 @@ func main() {
 		kubeconfig = flag.String("kubeconfig", "", "absolute path to the kubeconfig file")
 	}
 	flag.Parse()
-
 	// use the current context in kubeconfig
 	config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
 	if err != nil {
 		panic(err.Error())
 	}
-
 	// create the API client
 	c, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		panic(err.Error())
 	}
-
 	listOpts := meta.ListOptions{Limit: 9000}
 	podDisruptionBudgets := make([]policy.PodDisruptionBudget, 0)
 	activePDBs := make([]policy.PodDisruptionBudget, 0)
 	parents := make([]ParentResource, 0)
-
 	// List namespaces
 	_namespaces, err := c.CoreV1().Namespaces().List(context.TODO(), listOpts)
 	if err != nil {
@@ -58,7 +54,6 @@ func main() {
 		panic(fmt.Errorf("no namespaces found"))
 	}
 	namespaces := _namespaces.Items
-
 	// Get all PDBs
 	for _, n := range namespaces {
 		_pdbs, err := c.PolicyV1beta1().PodDisruptionBudgets(n.Name).List(context.TODO(), listOpts)
@@ -71,14 +66,12 @@ func main() {
 			}
 		}
 	}
-
 	// Get non obsolete podDisruptionBudgets, e.g. active ones
 	for _, pdb := range podDisruptionBudgets {
 		if pdb.Status.ExpectedPods > 0 && pdb.Status.DisruptionsAllowed == 0 {
 			activePDBs = append(activePDBs, pdb)
 		}
 	}
-
 	// Get all pods that match active PDBs namespaces and labels
 	for _, activePDB := range activePDBs {
 		pods, err := c.CoreV1().Pods(activePDB.Namespace).List(context.TODO(), listOpts)
@@ -86,34 +79,43 @@ func main() {
 			panic(fmt.Errorf("error listing pods: %s", err.Error()))
 		}
 		for _, pod := range pods.Items {
-			for _, or := range pod.OwnerReferences {
-				switch or.Kind {
-
-				case "ReplicaSet":
-					replicaSets, err := c.AppsV1().ReplicaSets(activePDB.Namespace).List(context.TODO(), listOpts)
-					if err != nil {
-						panic(fmt.Errorf("error listing replica sets: %s", err.Error()))
+			// Matching all pods that match all PDB label match selector
+			matchingLabelsCount := 0
+			for pdbk, pdbv := range activePDB.Spec.Selector.MatchLabels {
+				for pk, pv := range pod.ObjectMeta.Labels {
+					if pdbk == pk && pdbv == pv {
+						matchingLabelsCount++
 					}
-					for _, rs := range replicaSets.Items {
-						for _, rsp := range getRSParents(rs.OwnerReferences, activePDB) {
-							parents = append(parents, ParentResource{
-								Namespace:  activePDB.Namespace,
-								Name:       rsp.Name,
-								Kind:       rsp.Kind,
-								APIVersion: rsp.APIVersion,
-								PDBName:    activePDB.Name,
-							})
+				}
+			}
+			if matchingLabelsCount == len(activePDB.Spec.Selector.MatchLabels)-1 {
+				for _, or := range pod.OwnerReferences {
+					switch or.Kind {
+					case "ReplicaSet":
+						replicaSets, err := c.AppsV1().ReplicaSets(activePDB.Namespace).List(context.TODO(), listOpts)
+						if err != nil {
+							panic(fmt.Errorf("error listing replica sets: %s", err.Error()))
 						}
+						for _, rs := range replicaSets.Items {
+							for _, rsp := range getRSParents(rs.OwnerReferences, activePDB) {
+								parents = append(parents, ParentResource{
+									Namespace:  activePDB.Namespace,
+									Name:       rsp.Name,
+									Kind:       rsp.Kind,
+									APIVersion: rsp.APIVersion,
+									PDBName:    activePDB.Name,
+								})
+							}
+						}
+					default:
+						parents = append(parents, ParentResource{
+							Namespace:  activePDB.Namespace,
+							Name:       or.Name,
+							Kind:       or.Kind,
+							APIVersion: or.APIVersion,
+							PDBName:    activePDB.Name,
+						})
 					}
-
-				default:
-					parents = append(parents, ParentResource{
-						Namespace:  activePDB.Namespace,
-						Name:       or.Name,
-						Kind:       or.Kind,
-						APIVersion: or.APIVersion,
-						PDBName:    activePDB.Name,
-					})
 				}
 			}
 		}
@@ -130,7 +132,6 @@ func main() {
 			PDBName:    p.PDBName,
 		}
 	}
-
 	// Pretty print results
 	t := table.NewWriter()
 	t.SetTitle("Kubernetes resources impacted by active PodDisruptionBudgets")
