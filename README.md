@@ -21,3 +21,19 @@ $ ./pdb-pods-owners-discovery
 | argocd-application-controller | argocd    | apps/v1/StatefulSet | test-aac2 |
 +-------------------------------+-----------+---------------------+-----------+
 ```
+
+## Building
+
+Clone the repository within your `GOPATH`
+
+```sh
+mkdir -p $GOPATH/src/github.com/oboukili; cd $GOPATH/src/github.com/oboukili
+git clone git@github.com:oboukili/pdb-pods-owners-discovery
+```
+
+Then build the provider
+
+```sh
+cd $GOPATH/src/github.com/oboukili/pdb-pods-owners-discovery
+go build
+```
