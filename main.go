@@ -4,15 +4,17 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"os"
+	"path/filepath"
+
 	"github.com/jedib0t/go-pretty/v6/table"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
-	"os"
-	"path/filepath"
 
 	policy "k8s.io/api/policy/v1beta1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 )
 
 type ParentResource struct {
@@ -61,9 +63,7 @@ func main() {
 			panic(fmt.Errorf("error listing PodDisruptionBudgets: %s", err.Error()))
 		}
 		if _pdbs != nil {
-			for _, p := range _pdbs.Items {
-				podDisruptionBudgets = append(podDisruptionBudgets, p)
-			}
+			podDisruptionBudgets = append(podDisruptionBudgets, _pdbs.Items...)
 		}
 	}
 	// Get non obsolete podDisruptionBudgets, e.g. active ones
@@ -88,24 +88,22 @@ func main() {
 					}
 				}
 			}
-			if matchingLabelsCount == len(activePDB.Spec.Selector.MatchLabels)-1 {
+			if matchingLabelsCount > 0 && matchingLabelsCount == len(activePDB.Spec.Selector.MatchLabels) {
 				for _, or := range pod.OwnerReferences {
 					switch or.Kind {
 					case "ReplicaSet":
-						replicaSets, err := c.AppsV1().ReplicaSets(activePDB.Namespace).List(context.TODO(), listOpts)
+						replicaSet, err := c.AppsV1().ReplicaSets(activePDB.Namespace).Get(context.TODO(), or.Name, meta.GetOptions{})
 						if err != nil {
-							panic(fmt.Errorf("error listing replica sets: %s", err.Error()))
+							panic(fmt.Errorf("error listing replica set: %s", err.Error()))
 						}
-						for _, rs := range replicaSets.Items {
-							for _, rsp := range getRSParents(rs.OwnerReferences, activePDB) {
-								parents = append(parents, ParentResource{
-									Namespace:  activePDB.Namespace,
-									Name:       rsp.Name,
-									Kind:       rsp.Kind,
-									APIVersion: rsp.APIVersion,
-									PDBName:    activePDB.Name,
-								})
-							}
+						for _, rsp := range getRSParents(replicaSet.OwnerReferences, activePDB) {
+							parents = append(parents, ParentResource{
+								Namespace:  activePDB.Namespace,
+								Name:       rsp.Name,
+								Kind:       rsp.Kind,
+								APIVersion: rsp.APIVersion,
+								PDBName:    activePDB.Name,
+							})
 						}
 					default:
 						parents = append(parents, ParentResource{
